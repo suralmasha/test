@@ -1,0 +1,55 @@
+name: Project checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: project-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Установка зависимостей
+        shell: bash
+        run: |
+          if [ -f poetry.lock ]; then
+            python -m pip install 'poetry>=2,<3'
+            poetry install --no-interaction
+            echo 'TEST_RUNNER=poetry run python' >> "$GITHUB_ENV"
+          elif [ -f uv.lock ]; then
+            python -m pip install uv
+            uv sync --locked
+            echo 'TEST_RUNNER=uv run --no-sync python' >> "$GITHUB_ENV"
+          else
+            python -m pip install 'pytest>=8,<10'
+            if [ -f requirements.txt ]; then
+              python -m pip install -r requirements.txt
+            elif [ -f pyproject.toml ]; then
+              python -m pip install -e .
+            fi
+            echo 'TEST_RUNNER=python' >> "$GITHUB_ENV"
+          fi
+      - name: Запуск тестов
+        shell: bash
+        run: |
+          read -r -a runner <<< "$TEST_RUNNER"
+          test_status=0
+          "${runner[@]}" -m pytest || test_status=$?
+          if [ "$test_status" -eq 5 ]; then
+            echo 'Тесты пока не найдены. Проверка разрешает слияние.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          exit "$test_status"
